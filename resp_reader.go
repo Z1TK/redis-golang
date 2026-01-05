@@ -8,11 +8,11 @@ import (
 )
 
 const (
-	STRING = "+"
-	ERROR = "-"
-	INTEGER = ":"
-	BULK = "$"
-	ARRAY = "*"
+	STRING = '+'
+	ERROR = '-'
+	INTEGER = ':'
+	BULK = '$'
+	ARRAY = '*'
 )
 
 type respReader struct {
@@ -27,18 +27,22 @@ type Value struct {
 	array []Value
 }
 
+func NewRespReader(rd io.Reader) *respReader {
+	return &respReader{reader: bufio.NewReader(rd)}
+}
+
 func (r *respReader) Read() (Value, error) {
-	_type, err := r.reader.ReadByte()
+	typ, err := r.reader.ReadByte()
 	if err != nil {
 		return Value{}, err
 	}
-	switch _type {
+	switch typ {
 	case ARRAY:
 		return r.readArray()
 	case BULK:
 		return r.readBulk()
 	default:
-		fmt.Println("unknow type: %v", _type)
+		fmt.Printf("unknow type: %v", typ)
 		return Value{}, err
 	}
 }
