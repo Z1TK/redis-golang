@@ -19,16 +19,27 @@ type respReader struct {
 	reader *bufio.Reader
 }
 
-func (r *respReader) Read() error {
+type Value struct {
+	typ string
+	str string
+	num int
+	bulk string
+	array []Value
+}
+
+func (r *respReader) Read() (Value, error) {
 	_type, err := r.reader.ReadByte()
 	if err != nil {
-		return err
+		return Value{}, err
 	}
 	switch _type {
 	case ARRAY:
 		return r.readArray()
-	case BULT:
+	case BULK:
 		return r.readBulk()
+	default:
+		fmt.Println("unknow type: %v", _type)
+		return Value{}, err
 	}
 }
 
@@ -60,5 +71,46 @@ func (r *respReader) readLength() (n int, err error) {
 	return int(i64), nil
 }
 
-// *3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n //
+func (r *respReader) readArray() (Value, error) {
+	v := Value{}
+	v.typ = "array"
 
+	length, err := r.readLength()
+	if err != nil {
+		return v, err
+	}
+
+	v.array = make([]Value, length)
+	for i := range length {
+		v, err := r.Read()
+		if err != nil {
+			return v, err
+		}
+		v.array[i] = v
+	}
+
+	return v, err
+}
+
+func (r *respReader) readBulk() (Value, error) {
+	v := Value{}
+	v.typ = "bulk"
+
+	length, err := r.readLength()
+	if err != nil {
+		return v, err
+	}
+
+	bulk := make([]byte, length)
+
+	_, err = r.reader.Read(bulk)
+	if err != nil {
+		return v, err
+	}
+
+	v.bulk = string(bulk) 
+
+	r.readLine()
+
+	return v, nil
+}
