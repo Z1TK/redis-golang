@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"bufio"
+	"strconv"
 	"io"
 )
 
@@ -17,8 +18,6 @@ const (
 type respReader struct {
 	reader *bufio.Reader
 }
-
-// *3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n //
 
 func (r *respReader) Read() error {
 	_type, err := r.reader.ReadByte()
@@ -37,7 +36,7 @@ func (r *respReader) readLine() (line []byte, err error) {
 	for {
 		v, err := r.reader.ReadByte()
 		if err != nil {
-			return 0, 0, err
+			return nil, err
 		}
 		line = append(line, v)
 		if len(line) >= 2 && line[len(line) - 2] == '\r' {
@@ -48,12 +47,18 @@ func (r *respReader) readLine() (line []byte, err error) {
 	return line[:len(line) - 2], nil 
 }
 
-// func (r *respReader) readLength() (n int, err error) {
-// 	length, err := r.readLine()
-// 	if err != nil {
-// 		return 0, err
-// 	}
-// }
+func (r *respReader) readLength() (n int, err error) {
+	length, err := r.readLine()
+	if err != nil {
+		return 0, err
+	}
+	i64, err := strconv.ParseInt(string(length), 10, 64)
+	if err != nil {
+		return 0, err
+	}
 
+	return int(i64), nil
+}
 
+// *3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n //
 
