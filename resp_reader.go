@@ -85,12 +85,12 @@ func (r *respReader) readArray() (Value, error) {
 	}
 
 	v.array = make([]Value, length)
-	for i := range length {
+	for i := 0; i < length; i++ {
 		v, err := r.Read()
 		if err != nil {
 			return v, err
 		}
-		v.array[i] = v
+		v.array = append(v.array, v)
 	}
 
 	return v, err
