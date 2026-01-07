@@ -4,18 +4,23 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 )
 
 type DataType struct {
 	Strings map[string]string
-	List map[string][]string
+	Lists map[string][]string
+	Hashes map[string]map[string]string
+	Timer map[string]time.Time
 	Mu sync.RWMutex
 }
 
 func createDT() *DataType {
 	return &DataType{
 		Strings: make(map[string]string),
-		List: make(map[string][]string),
+		Lists: make(map[string][]string),
+		Hashes: make(map[string]map[string]string),
+		Timer: make(map[string]time.Time),
 	}
 }
 
@@ -33,10 +38,10 @@ var Handlers = map[string]func(*DataType, []Value) Value {
 	"RPOP": rpop,
 	"LPOP": lpop,
 	"LRANGE": lrange,
-	// "DEL": del,
-	// "EXPIRE": expire,
+	"DEL": del,
+	"EXPIRE": expire,
 	// "TTL": ttl,
-	// create fold for handlers, command_stuf, strings_command, list_command
+	// create fold for handlers, command_stuf, strings_command, Lists_command
 }
 
 func ping(_ *DataType, args []Value) Value {
@@ -202,10 +207,10 @@ func rpush(dt *DataType, args []Value) Value {
 	defer dt.Mu.Unlock()
 
 	for i := 1; i < length; i++ {
-		dt.List[key] = append(dt.List[key], args[i].bulk)
+		dt.Lists[key] = append(dt.Lists[key], args[i].bulk)
 	}
 
-	n := len(dt.List[key])
+	n := len(dt.Lists[key])
 
 	return Value{typ: "integer", num: n}
 }
@@ -222,12 +227,12 @@ func lpush(dt *DataType, args []Value) Value {
 	defer dt.Mu.Unlock()
 
 	for i := 1; i < length; i++ {
-		dt.List[key] = append([]string{args[i].bulk}, dt.List[key]...)
+		dt.Lists[key] = append([]string{args[i].bulk}, dt.Lists[key]...)
 	}
 
-	n := len(dt.List[key])
+	n := len(dt.Lists[key])
 
-	fmt.Println(dt.List[key][0])
+	fmt.Println(dt.Lists[key][0])
 
 	return Value{typ: "integer", num: n}
 }
@@ -243,7 +248,7 @@ func rpop(dt *DataType, args []Value) Value {
 	dt.Mu.Lock()
 	defer dt.Mu.Unlock()
 
-	data, exist := dt.List[key]
+	data, exist := dt.Lists[key]
 	if len(data) == 0 || !exist {
 		return Value{typ: "array", array: []Value{}}
 	}
@@ -260,15 +265,15 @@ func rpop(dt *DataType, args []Value) Value {
 		}
 
 		for i := 0; i < val; i++ {
-			res = append(res, Value{typ: "bulk", bulk: dt.List[key][length - 1 - i]})
+			res = append(res, Value{typ: "bulk", bulk: dt.Lists[key][length - 1 - i]})
 		}
 
-		dt.List[key] = dt.List[key][:length - val]	
+		dt.Lists[key] = dt.Lists[key][:length - val]	
 		return Value{typ: "array", array: res}
 	} 
 
-	val := dt.List[key][length - 1]
-	dt.List[key] = dt.List[key][:length - 1]
+	val := dt.Lists[key][length - 1]
+	dt.Lists[key] = dt.Lists[key][:length - 1]
 	return Value{typ: "bulk", bulk: val}
 }
 
@@ -285,7 +290,7 @@ func lpop(dt *DataType, args []Value) Value {
 
 
 
-	data, exist := dt.List[key]
+	data, exist := dt.Lists[key]
 	if len(data) == 0 || !exist {
 		return Value{typ: "array", array: []Value{}}
 	}
@@ -302,15 +307,15 @@ func lpop(dt *DataType, args []Value) Value {
 		}
 
 		for i := 0; i < val; i++ {
-			res = append(res, Value{typ: "bulk", bulk: dt.List[key][i]})
+			res = append(res, Value{typ: "bulk", bulk: dt.Lists[key][i]})
 		}
 
-		dt.List[key] = dt.List[key][val:]
+		dt.Lists[key] = dt.Lists[key][val:]
 		return Value{typ: "array", array: res}
 	}
 
-	val := dt.List[key][0]
-	dt.List[key] = dt.List[key][1:]
+	val := dt.Lists[key][0]
+	dt.Lists[key] = dt.Lists[key][1:]
 	return Value{typ: "bulk", bulk: val}
 }
 
@@ -333,7 +338,7 @@ func lrange(dt *DataType, args []Value) Value {
 	dt.Mu.Lock()
 	defer dt.Mu.Unlock()
 
-	data, exist := dt.List[key]
+	data, exist := dt.Lists[key]
 	if len(data) == 0 || !exist {
 		return Value{typ: "array", array: []Value{}}
 	}
@@ -359,10 +364,75 @@ func lrange(dt *DataType, args []Value) Value {
 		endInt = length - 1
 	}
 
-	val := dt.List[key][startInt:endInt + 1]
+	val := dt.Lists[key][startInt:endInt + 1]
 	for i := 0; i < len(val); i++ {
 		res = append(res, Value{typ: "bulk", bulk: val[i]})
 	}
 
 	return Value{typ: "array", array: res}
+}
+
+func del(dt *DataType, args []Value) Value {
+	if len(args) < 1 {
+		return Value{typ: "error", str: "wrong number of arguments for 'DEL' command"}
+	}
+
+	length := len(args)
+	n := 0
+
+	dt.Mu.Lock()
+	defer dt.Mu.Unlock()
+
+	for i := 0; i < length; i++ {
+		if _, exist := dt.Strings[args[i].bulk]; exist {
+			delete(dt.Strings, args[i].bulk)
+			n++
+		}
+
+		if _, exist := dt.Lists[args[i].bulk]; exist {
+			delete(dt.Lists, args[i].bulk)
+			n++
+		}
+
+		if _, exist := dt.Hashes[args[i].bulk]; exist {
+			delete(dt.Hashes, args[i].bulk)
+			n++
+		}
+	}
+
+	return Value{typ: "integer", num: n}
+}
+
+
+//test expire
+func expire(dt *DataType, args []Value) Value {
+	if len(args) < 2 {
+		return Value{typ: "error", str: "wrong number of arguments for 'expire' command"}
+	}
+
+	key := args[0].bulk
+	n, err := strconv.Atoi(args[1].bulk)
+	if err != nil {
+		return Value{typ: "error", str: "value is not an integer or out of range"}
+	}
+
+	dt.Mu.Lock()
+	defer dt.Mu.Unlock()
+
+	if _, exist := dt.Strings[key]; exist {
+		dt.Timer[key] = time.Now().Add(time.Duration(n) * time.Second)
+		return Value{typ: "integer", num: 1}
+	}
+
+	if _, exist := dt.Lists[key]; exist {
+		dt.Timer[key] = time.Now().Add(time.Duration(n) * time.Second)
+		return Value{typ: "integer", num: 1}
+	}
+
+	if _, exist := dt.Hashes[key]; exist {
+		dt.Timer[key] = time.Now().Add(time.Duration(n) * time.Second)
+		return Value{typ: "integer", num: 1}
+	}
+
+	return Value{typ: "integer", num: 0}
 }
