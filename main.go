@@ -22,7 +22,7 @@ func main() {
 	}
 	defer conn.Close()
 
-	kv := createKVP()
+	dt := createDT()
 
 	for {
 		reader := NewRespReader(conn)
@@ -53,7 +53,7 @@ func main() {
 			writer.Write(Value{typ: "string", str: ""})
 			continue
 		}
-		result := handler(kv, args)
+		result := handler(dt, args)
 
 		writer.Write(result)
 	}
