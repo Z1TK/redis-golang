@@ -11,7 +11,7 @@ type DataType struct {
 	Strings map[string]string
 	Lists map[string][]string
 	Hashes map[string]map[string]string
-	Timer map[string]time.Time
+	ExpireTime map[string]time.Time
 	Mu sync.RWMutex
 }
 
@@ -20,30 +20,48 @@ func createDT() *DataType {
 		Strings: make(map[string]string),
 		Lists: make(map[string][]string),
 		Hashes: make(map[string]map[string]string),
-		Timer: make(map[string]time.Time),
+		ExpireTime: make(map[string]time.Time),
 	}
 }
 
 var Handlers = map[string]func(*DataType, []Value) Value {
-	"PING": ping,
-	"SET": set,
+	"PING": ping, //connection commands//
+	"SET": set, //string commands //
 	"GET": get,
 	"SETNX": setnx,
 	"MSET": mset,
 	"MGET": mget,
 	"INCR": incr,
 	"DECR": decr,
-	"RPUSH": rpush,
+	"RPUSH": rpush, // list commands//
 	"LPUSH": lpush,
 	"RPOP": rpop,
 	"LPOP": lpop,
 	"LRANGE": lrange,
-	"DEL": del,
+	"DEL": del, // GENERIC COMMANDS //
 	"EXPIRE": expire,
-	// "TTL": ttl,
-	// create fold for handlers, command_stuf, strings_command, Lists_command
+	"TTL": ttl,
 }
 
+// helpers //
+func checkExpireTime(dt *DataType, key string) bool {
+	if _, exist := dt.ExpireTime[key]; !exist {
+		return false
+	}
+
+	if time.Now().After(dt.ExpireTime[key]) {
+		delete(dt.Strings, key)
+		delete(dt.Lists, key)
+		delete(dt.Hashes, key)
+		delete(dt.ExpireTime, key)
+
+		return true
+	}
+
+	return false
+}
+
+// CONECTION COMMANDS //
 func ping(_ *DataType, args []Value) Value {
 	if len(args) == 0 {
 		return Value{typ: "string", str: "PONG"}
@@ -52,6 +70,7 @@ func ping(_ *DataType, args []Value) Value {
 	return Value{typ: "string", str: args[0].bulk}
 }
 
+// STRING COMMANDS //
 func set(dt *DataType, args []Value) Value {
 	if len(args) != 2 {
 		return Value{typ: "error", str: "wrong number of arguments for 'set' command"}
@@ -80,6 +99,10 @@ func get(dt *DataType, args []Value) Value {
 
 	val, ok := dt.Strings[key]
 	if !ok {
+		return Value{typ: "null"}
+	}
+
+	if checkExpireTime(dt, key) {
 		return Value{typ: "null"}
 	}
 
@@ -133,6 +156,11 @@ func mget(dt *DataType, args []Value) Value {
 
 	for i := 0; i < len(args); i += 1 {
 		key := args[i].bulk
+		
+		if checkExpireTime(dt, key) {
+			return Value{typ: "null"}
+		}
+		
 		if val, exist := dt.Strings[key]; exist {
 			res = append(res, Value{typ: "bulk", bulk: val})
 		} else {
@@ -153,7 +181,7 @@ func incr(dt *DataType, args []Value) Value {
 	dt.Mu.Lock()
 	defer dt.Mu.Unlock()
 
-	if _, exist := dt.Strings[key]; !exist {
+	if _, exist := dt.Strings[key]; !exist || checkExpireTime(dt, key) {
 		dt.Strings[key] = "1"
 		return Value{typ: "integer", num: 1}
 	}
@@ -179,7 +207,7 @@ func decr(dt *DataType, args []Value) Value {
 	dt.Mu.Lock()
 	defer dt.Mu.Unlock()
 
-	if _, exist := dt.Strings[key]; !exist {
+	if _, exist := dt.Strings[key]; !exist || checkExpireTime(dt, key) {
 		dt.Strings[key] = "-1"
 		return Value{typ: "integer", num: -1}
 	}
@@ -195,6 +223,7 @@ func decr(dt *DataType, args []Value) Value {
 	return Value{typ: "integer", num: n}
 }
 
+// LIST COMMAND
 func rpush(dt *DataType, args []Value) Value {
 	if len(args) < 2 {
 		return Value{typ: "error", str: "wrong number of arguments for 'rpush' command"}
@@ -205,6 +234,10 @@ func rpush(dt *DataType, args []Value) Value {
 
 	dt.Mu.Lock()
 	defer dt.Mu.Unlock()
+
+	if _, exist := dt.Lists[key]; !exist || checkExpireTime(dt, key) {
+		dt.Lists[key] = make([]string, 0)
+	}
 
 	for i := 1; i < length; i++ {
 		dt.Lists[key] = append(dt.Lists[key], args[i].bulk)
@@ -225,6 +258,10 @@ func lpush(dt *DataType, args []Value) Value {
 
 	dt.Mu.Lock()
 	defer dt.Mu.Unlock()
+
+	if _, exist := dt.Lists[key]; !exist || checkExpireTime(dt, key) {
+		dt.Lists[key] = make([]string, 0)
+	}
 
 	for i := 1; i < length; i++ {
 		dt.Lists[key] = append([]string{args[i].bulk}, dt.Lists[key]...)
@@ -249,8 +286,8 @@ func rpop(dt *DataType, args []Value) Value {
 	defer dt.Mu.Unlock()
 
 	data, exist := dt.Lists[key]
-	if len(data) == 0 || !exist {
-		return Value{typ: "array", array: []Value{}}
+	if len(data) == 0 || !exist || checkExpireTime(dt, key) {
+		return Value{typ: "null"}
 	}
 	length := len(data) 
 
@@ -291,7 +328,7 @@ func lpop(dt *DataType, args []Value) Value {
 
 
 	data, exist := dt.Lists[key]
-	if len(data) == 0 || !exist {
+	if len(data) == 0 || !exist || checkExpireTime(dt, key){
 		return Value{typ: "array", array: []Value{}}
 	}
 	length := len(data) 
@@ -339,7 +376,7 @@ func lrange(dt *DataType, args []Value) Value {
 	defer dt.Mu.Unlock()
 
 	data, exist := dt.Lists[key]
-	if len(data) == 0 || !exist {
+	if len(data) == 0 || !exist || checkExpireTime(dt, key){
 		return Value{typ: "array", array: []Value{}}
 	}
 	length := len(data) 
@@ -372,6 +409,9 @@ func lrange(dt *DataType, args []Value) Value {
 	return Value{typ: "array", array: res}
 }
 
+// HASH COMMANDS //
+
+// GENERIC COMMANDS //
 func del(dt *DataType, args []Value) Value {
 	if len(args) < 1 {
 		return Value{typ: "error", str: "wrong number of arguments for 'DEL' command"}
@@ -384,27 +424,29 @@ func del(dt *DataType, args []Value) Value {
 	defer dt.Mu.Unlock()
 
 	for i := 0; i < length; i++ {
-		if _, exist := dt.Strings[args[i].bulk]; exist {
-			delete(dt.Strings, args[i].bulk)
+		key := args[i].bulk
+
+		if _, exist := dt.Strings[key]; exist {
+			delete(dt.Strings, key)
 			n++
 		}
 
-		if _, exist := dt.Lists[args[i].bulk]; exist {
-			delete(dt.Lists, args[i].bulk)
+		if _, exist := dt.Lists[key]; exist {
+			delete(dt.Lists, key)
 			n++
 		}
 
-		if _, exist := dt.Hashes[args[i].bulk]; exist {
-			delete(dt.Hashes, args[i].bulk)
+		if _, exist := dt.Hashes[key]; exist {
+			delete(dt.Hashes, key)
 			n++
 		}
+
+		delete(dt.ExpireTime, key)
 	}
 
 	return Value{typ: "integer", num: n}
 }
 
-
-//test expire
 func expire(dt *DataType, args []Value) Value {
 	if len(args) < 2 {
 		return Value{typ: "error", str: "wrong number of arguments for 'expire' command"}
@@ -419,20 +461,59 @@ func expire(dt *DataType, args []Value) Value {
 	dt.Mu.Lock()
 	defer dt.Mu.Unlock()
 
+	var key_exist bool
+
 	if _, exist := dt.Strings[key]; exist {
-		dt.Timer[key] = time.Now().Add(time.Duration(n) * time.Second)
-		return Value{typ: "integer", num: 1}
+		key_exist = true
 	}
 
 	if _, exist := dt.Lists[key]; exist {
-		dt.Timer[key] = time.Now().Add(time.Duration(n) * time.Second)
-		return Value{typ: "integer", num: 1}
+		key_exist = true
 	}
 
 	if _, exist := dt.Hashes[key]; exist {
-		dt.Timer[key] = time.Now().Add(time.Duration(n) * time.Second)
+		key_exist = true
+	}
+
+	if key_exist {
+		dt.ExpireTime[key] = time.Now().Add(time.Duration(n) * time.Second)
 		return Value{typ: "integer", num: 1}
 	}
 
 	return Value{typ: "integer", num: 0}
+}
+
+func ttl(dt *DataType, args []Value) Value {
+	if len(args) != 1 {
+		return Value{typ: "error", str: "wrong number of arguments for 'ttl' command"}
+	}
+
+	key := args[0].bulk
+
+	var key_exist bool
+
+	if _, exist := dt.Strings[key]; exist {
+		key_exist = true
+	}
+
+	if _, exist := dt.Lists[key]; exist {
+		key_exist = true
+	}
+
+	if _, exist := dt.Hashes[key]; exist {
+		key_exist = true
+	}
+
+	if key_exist {
+		if expire_time, exist := dt.ExpireTime[key]; exist {
+			if time.Now().Before(expire_time) {
+				ttl := time.Until(expire_time).Seconds()
+				return Value{typ: "integer", num: int(ttl)}
+			}
+		}
+
+		return Value{typ: "integer", num: -1}
+	}
+
+	return Value{typ: "integer", num: -2}
 }
