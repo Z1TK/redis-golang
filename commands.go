@@ -29,6 +29,10 @@ var Handlers = map[string]func(*DataType, []Value) Value {
 	"SET": set, //string commands //
 	"GET": get,
 	"SETNX": setnx,
+	"SETEX": setex,
+	"GETEX": getex,
+	"STRLEN": strlen,
+	"GETRANGE": getrange,
 	"MSET": mset,
 	"MGET": mget,
 	"INCR": incr,
@@ -126,6 +130,129 @@ func setnx(dt *DataType, args []Value) Value {
 	}
 
 	return Value{typ: "integer", num: 0}
+}
+
+func setex(dt *DataType, args []Value) Value {
+	if len(args) != 3 {
+		return Value{typ: "error", str: "wrong number of arguments for 'setex' command"}
+	}
+
+	key := args[0].bulk
+	t, err := strconv.Atoi(args[1].bulk)	
+	if err != nil {
+		return Value{typ: "error", str: "value is not an integer or out of range"}
+	}
+	val := args[2].bulk
+
+	dt.Mu.Lock()
+	defer dt.Mu.Unlock()
+
+	dt.Strings[key] = val
+	dt.ExpireTime[key] = time.Now().Add(time.Duration(t) * time.Second)
+
+	return Value{typ: "string", str: "OK"}
+}
+
+func getex(dt *DataType, args []Value) Value {
+	if len(args) < 1 || len(args) > 3 {
+		return Value{typ: "error", str: "wrong number of arguments for 'get' command"}
+	}
+
+	key := args[0].bulk
+
+	dt.Mu.Lock()
+	defer dt.Mu.Unlock()
+
+	val, ok := dt.Strings[key]
+	if !ok {
+		return Value{typ: "null"}
+	}
+
+	if checkExpireTime(dt, key) {
+		return Value{typ: "null"}
+	}
+
+	if len(args) == 3 {
+		t, err := strconv.Atoi(args[2].bulk)
+		if err != nil {
+			return Value{typ: "error", str: "value is not an integer or out of range"}
+		}
+
+		dt.ExpireTime[key] = time.Now().Add(time.Duration(t) * time.Second)
+	}
+
+	return Value{typ: "bulk", bulk: val}
+}
+
+func strlen(dt *DataType, args []Value) Value {
+	if len(args) != 1 {
+		return Value{typ: "error", str: "wrong number of arguments for 'strlen' command"}
+	}
+
+	key := args[0].bulk
+
+	dt.Mu.Lock()
+	defer dt.Mu.Unlock()
+
+	val, ok := dt.Strings[key]
+	if !ok {
+		return Value{typ: "integer", num: 0}
+	}
+
+	if checkExpireTime(dt, key) {
+		return Value{typ: "integer", num: 0}
+	}
+
+	return Value{typ: "integer", num: len(val)}
+}
+
+func getrange(dt *DataType, args []Value) Value {
+	if len(args) != 3 {
+		return Value{typ: "error", str: "wrong number of arguments for 'getrange' command"}
+	}
+
+	key := args[0].bulk
+	startInt, err := strconv.Atoi(args[1].bulk)
+	if err != nil {
+		return Value{typ: "error", str: "value is not an integer or out of range"}
+	}
+	endInt, err := strconv.Atoi(args[2].bulk)
+	if err != nil {
+		return Value{typ: "error", str: "value is not an integer or out of range"}
+	}
+
+	dt.Mu.Lock()
+	defer dt.Mu.Unlock()
+
+	data, exist := dt.Strings[key]
+	if len(data) == 0 || !exist || checkExpireTime(dt, key){
+		return Value{typ: "array", array: []Value{}}
+	}
+	length := len(data) 
+
+	if startInt < 0 {
+		startInt = length + startInt
+	}
+
+	if startInt < 0 {
+		startInt = 0
+	}
+
+	if endInt < 0 {
+		endInt = length + endInt
+	}
+
+	if startInt >= endInt {
+		return Value{typ: "array", array: []Value{}}
+	}
+
+	if endInt >= length {
+		endInt = length - 1
+	}
+
+	val := dt.Strings[key][startInt:endInt + 1]
+
+	return Value{typ: "bulk", bulk: val}
 }
 
 func mset(dt *DataType, args []Value) Value {
