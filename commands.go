@@ -50,12 +50,10 @@ var Handlers = map[string]func(*DataType, []Value) Value {
 	"LPUSH": lpush,
 	"RPOP": rpop,
 	"LPOP": lpop,
-	// "LRANGE": lrange,
-	// "LPUSHX": lpushx,
-	// "RPUSHX": rpushx,
-	// "LLEN": llen,
-	// "LINDEX": lindex,
-	// "LSET": lset,
+	"LRANGE": lrange,
+	"LPUSHX": lpushx,
+	"RPUSHX": rpushx,
+	"LLEN": llen,
 	"DEL": del, // generic commands //
 	"EXPIRE": expire,
 	"TTL": ttl,
@@ -644,8 +642,6 @@ func lpush(dt *DataType, args []Value) Value {
 
 	n := len(dt.Lists[key])
 
-	fmt.Println(dt.Lists[key][0])
-
 	return Value{typ: "integer", num: n}
 }
 
@@ -747,8 +743,8 @@ func lrange(dt *DataType, args []Value) Value {
 		return Value{typ: "error", str: "value is not an integer or out of range"}
 	}
 
-	dt.Mu.Lock()
-	defer dt.Mu.Unlock()
+	dt.Mu.RLock()
+	defer dt.Mu.RUnlock()
 
 	data, exist := dt.Lists[key]
 	if len(data) == 0 || !exist || checkExpireTime(dt, key){
@@ -768,7 +764,7 @@ func lrange(dt *DataType, args []Value) Value {
 		endInt = length + endInt
 	}
 
-	if startInt >= endInt {
+	if startInt > endInt {
 		return Value{typ: "array", array: []Value{}}
 	}
 
@@ -784,7 +780,77 @@ func lrange(dt *DataType, args []Value) Value {
 	return Value{typ: "array", array: res}
 }
 
-// HASH COMMANDS //
+func lpushx(dt *DataType, args []Value) Value {
+	if len(args) < 2 {
+		return Value{typ: "error", str: "wrong number of arguments for 'lpushx' command"}
+	}
+
+	key := args[0].bulk
+	length := len(args)
+
+	dt.Mu.Lock()
+	defer dt.Mu.Unlock()
+
+	if _, exist := dt.Lists[key]; !exist || checkExpireTime(dt, key) {
+		return Value{typ: "integer", num: 0}
+	}
+
+	for i := 1; i < length; i++ {
+		dt.Lists[key] = append([]string{args[i].bulk}, dt.Lists[key]...)
+	}
+
+	n := len(dt.Lists[key])
+
+	fmt.Println(dt.Lists[key][0])
+
+	return Value{typ: "integer", num: n}
+}
+
+func rpushx(dt *DataType, args []Value) Value {
+	if len(args) < 2 {
+		return Value{typ: "error", str: "wrong number of arguments for 'rpushx' command"}
+	}
+
+	key := args[0].bulk
+	length := len(args)
+
+	dt.Mu.Lock()
+	defer dt.Mu.Unlock()
+
+	if _, exist := dt.Lists[key]; !exist || checkExpireTime(dt, key) {
+		return Value{typ: "integer", num: 0}
+	}
+
+	for i := 1; i < length; i++ {
+		dt.Lists[key] = append(dt.Lists[key], args[i].bulk)
+	}
+
+	n := len(dt.Lists[key])
+
+	return Value{typ: "integer", num: n}
+}
+
+func llen(dt *DataType, args []Value) Value {
+	if len(args) != 1 {
+		return Value{typ: "error", str: "wrong number of arguments for 'llen' command"}
+	}
+
+	key := args[0].bulk
+
+	dt.Mu.Lock()
+	defer dt.Mu.Unlock()
+
+	val, ok := dt.Lists[key]
+	if !ok {
+		return Value{typ: "integer", num: 0}
+	}
+
+	if checkExpireTime(dt, key) {
+		return Value{typ: "integer", num: 0}
+	}
+
+	return Value{typ: "integer", num: len(val)}
+}
 
 // GENERIC COMMANDS //
 func del(dt *DataType, args []Value) Value {
