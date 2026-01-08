@@ -25,8 +25,8 @@ func createDT() *DataType {
 }
 
 var Handlers = map[string]func(*DataType, []Value) Value {
-	"PING": ping, //connection commands//
-	"SET": set, //string commands //
+	"PING": ping, // connection commands //
+	"SET": set, // string commands //
 	"GET": get,
 	"SETNX": setnx,
 	"SETEX": setex,
@@ -37,12 +37,26 @@ var Handlers = map[string]func(*DataType, []Value) Value {
 	"MGET": mget,
 	"INCR": incr,
 	"DECR": decr,
-	"RPUSH": rpush, // list commands//
+	"HSET": hset, // hash commands //
+	"HGET": hget,
+	"HDEL": hdel,
+	"HEXISTS": hexists,
+	"HMGET": hmget,
+	"HGETALL": hgetall,
+	"HLEN":  hlen,
+	"HKEYS": hkeys,
+	"HVALS": hvals,
+	"RPUSH": rpush, // list commands //
 	"LPUSH": lpush,
 	"RPOP": rpop,
 	"LPOP": lpop,
-	"LRANGE": lrange,
-	"DEL": del, // GENERIC COMMANDS //
+	// "LRANGE": lrange,
+	// "LPUSHX": lpushx,
+	// "RPUSHX": rpushx,
+	// "LLEN": llen,
+	// "LINDEX": lindex,
+	// "LSET": lset,
+	"DEL": del, // generic commands //
 	"EXPIRE": expire,
 	"TTL": ttl,
 }
@@ -98,8 +112,8 @@ func get(dt *DataType, args []Value) Value {
 
 	key := args[0].bulk
 
-	dt.Mu.Lock()
-	defer dt.Mu.Unlock()
+	dt.Mu.RLock()
+	defer dt.Mu.RUnlock()
 
 	val, ok := dt.Strings[key]
 	if !ok {
@@ -160,8 +174,8 @@ func getex(dt *DataType, args []Value) Value {
 
 	key := args[0].bulk
 
-	dt.Mu.Lock()
-	defer dt.Mu.Unlock()
+	dt.Mu.RLock()
+	defer dt.Mu.RUnlock()
 
 	val, ok := dt.Strings[key]
 	if !ok {
@@ -221,8 +235,8 @@ func getrange(dt *DataType, args []Value) Value {
 		return Value{typ: "error", str: "value is not an integer or out of range"}
 	}
 
-	dt.Mu.Lock()
-	defer dt.Mu.Unlock()
+	dt.Mu.RLock()
+	defer dt.Mu.RUnlock()
 
 	data, exist := dt.Strings[key]
 	if len(data) == 0 || !exist || checkExpireTime(dt, key){
@@ -278,8 +292,8 @@ func mget(dt *DataType, args []Value) Value {
 	}
 
 	var res []Value
-	dt.Mu.Lock()
-	defer dt.Mu.Unlock()
+	dt.Mu.RLock()
+	defer dt.Mu.RUnlock()
 
 	for i := 0; i < len(args); i += 1 {
 		key := args[i].bulk
@@ -350,7 +364,241 @@ func decr(dt *DataType, args []Value) Value {
 	return Value{typ: "integer", num: n}
 }
 
-// LIST COMMAND
+// HASH COMMAND //
+func hset(dt *DataType, args []Value) Value {
+	if len(args) < 3 {
+		return Value{typ: "error", str: "wrong number of arguments for 'hset' command"}
+	}
+
+	var n int
+	hash := args[0].bulk
+
+	dt.Mu.Lock()
+	defer dt.Mu.Unlock()
+
+	if dt.Hashes[hash] == nil {
+		dt.Hashes[hash] = make(map[string]string)
+	}
+
+	if len(args) % 2 != 0 {
+		for i := 1; i < len(args); i += 2 {
+			key := args[i].bulk
+			val := args[i + 1].bulk
+			dt.Hashes[hash][key] = val
+			n++
+		}
+	} else {
+		return Value{typ: "error", str: "wrong number of arguments for 'hset' command"}
+	}
+
+	return Value{typ: "integer", num: n}
+}
+
+func hget(dt *DataType, args []Value) Value {
+	if len(args) != 2 {
+		return Value{typ: "error", str: "wrong number of arguments for 'hget' command"}
+	}
+
+	hash := args[0].bulk
+	key := args[1].bulk
+
+	dt.Mu.RLock()
+	defer dt.Mu.RUnlock()
+
+	if checkExpireTime(dt, hash) {
+		return Value{typ: "null"}
+	}
+
+	val, exist := dt.Hashes[hash][key]; 
+	if !exist {
+		return Value{typ: "null"}
+	}
+
+	return Value{typ: "bulk", bulk: val}
+}
+
+func hdel(dt *DataType, args []Value) Value {
+	if len(args) < 2 {
+		return Value{typ: "error", str: "wrong number of arguments for 'hget' command"}
+	}
+
+	var n int
+	hash := args[0].bulk
+	key := args[1].bulk
+
+	if _, exist := dt.Hashes[hash][key]; !exist {
+		return Value{typ: "integer", num: 0}
+	}
+
+	dt.Mu.Lock()
+	defer dt.Mu.Unlock()
+
+	if dt.Hashes[hash] == nil {
+		return Value{typ: "integer", num: 0}
+	}
+
+	for i := 1; i < len(args); i++ {
+		key := args[i].bulk
+		if _, exist := dt.Hashes[hash][key]; exist {
+			delete(dt.Hashes[hash], key)
+			n++
+		}
+	}
+
+	return Value{typ: "integer", num: n}
+}
+
+func hexists(dt *DataType, args []Value) Value {
+	if len(args) < 2 {
+		return Value{typ: "error", str: "wrong number of arguments for 'hget' command"}
+	}
+
+	hash := args[0].bulk
+	key := args[1].bulk
+
+	dt.Mu.RLock()
+	defer dt.Mu.RUnlock()
+
+	if checkExpireTime(dt, hash) {
+		return Value{typ: "integer", num: 0}
+	}
+
+	if _, exist := dt.Hashes[hash][key]; !exist {
+		return Value{typ: "integer", num: 0}
+	}
+
+	return Value{typ: "integer", num: 1}
+}
+
+func hmget(dt *DataType, args []Value) Value {
+	if len(args) < 1 {
+		return Value{typ: "error", str: "wrong number of arguments for 'hmget' command"}
+	}
+
+	var res []Value
+	hash := args[0].bulk
+
+	dt.Mu.RLock()
+	defer dt.Mu.RUnlock()
+
+	if checkExpireTime(dt, hash) {
+			return Value{typ: "null"}
+		}
+
+	for i := 1; i < len(args); i++ {
+		key := args[i].bulk
+		
+		if val, exist := dt.Hashes[hash][key]; exist {
+			res = append(res, Value{typ: "bulk", bulk: val})
+		} else {
+			res = append(res, Value{typ: "null"})
+		}
+	}
+
+	return Value{typ: "array", array: res}
+}
+
+func hgetall(dt *DataType, args []Value) Value {
+	if len(args) != 1 {
+		return Value{typ: "error", str: "wrong number of arguments for 'hgetall' command"}
+	}
+
+	var res []Value
+	hash := args[0].bulk
+
+	dt.Mu.RLock()
+	defer dt.Mu.RUnlock()
+
+	if _, exist := dt.Hashes[hash]; !exist {
+		return Value{typ: "array", array: []Value{}}
+	}
+
+	if checkExpireTime(dt, hash) {
+			return Value{typ: "array", array: []Value{}}
+		}
+
+	for key, val := range dt.Hashes[hash] {
+		res = append(res, Value{typ: "bulk", bulk: key}, Value{typ: "bulk", bulk: val})
+	}
+
+	return Value{typ: "array", array: res}
+}
+
+func hlen(dt *DataType, args []Value) Value {
+	if len(args) != 1 {
+		return Value{typ: "error", str: "wrong number of arguments for 'hlen' command"}
+	}
+
+	hash := args[0].bulk
+
+	dt.Mu.Lock()
+	defer dt.Mu.Unlock()
+
+	val, ok := dt.Hashes[hash]
+	if !ok {
+		return Value{typ: "integer", num: 0}
+	}
+
+	if checkExpireTime(dt, hash) {
+		return Value{typ: "integer", num: 0}
+	}
+
+	return Value{typ: "integer", num: len(val)}
+}
+
+func hkeys(dt *DataType, args []Value) Value {
+	if len(args) != 1 {
+		return Value{typ: "error", str: "wrong number of arguments for 'hkeys' command"}
+	}
+
+	var res []Value
+	hash := args[0].bulk
+
+	dt.Mu.RLock()
+	defer dt.Mu.RUnlock()
+
+	if _, exist := dt.Hashes[hash]; !exist {
+		return Value{typ: "array", array: []Value{}}
+	}
+
+	if checkExpireTime(dt, hash) {
+			return Value{typ: "array", array: []Value{}}
+		}
+
+	for key := range dt.Hashes[hash] {
+		res = append(res, Value{typ: "bulk", bulk: key})
+	}
+
+	return Value{typ: "array", array: res}
+}
+
+func hvals(dt *DataType, args []Value) Value {
+	if len(args) != 1 {
+		return Value{typ: "error", str: "wrong number of arguments for 'hvals' command"}
+	}
+
+	var res []Value
+	hash := args[0].bulk
+
+	dt.Mu.RLock()
+	defer dt.Mu.RUnlock()
+
+	if _, exist := dt.Hashes[hash]; !exist {
+		return Value{typ: "array", array: []Value{}}
+	}
+
+	if checkExpireTime(dt, hash) {
+			return Value{typ: "array", array: []Value{}}
+		}
+
+	for _, val := range dt.Hashes[hash] {
+		res = append(res, Value{typ: "bulk", bulk: val})
+	}
+
+	return Value{typ: "array", array: res}
+}
+
+// LIST COMMAND //
 func rpush(dt *DataType, args []Value) Value {
 	if len(args) < 2 {
 		return Value{typ: "error", str: "wrong number of arguments for 'rpush' command"}
