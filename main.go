@@ -15,11 +15,25 @@ func main() {
 	}
 	defer ser.Close()
 
+	dt := createDT()
+	
 	aof, err := NewAof("database.aof")
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
+
+	aof.AofRead(func(value Value) {
+		command := strings.ToUpper(value.array[0].bulk)
+		args := value.array[1:]
+
+		handler, ok := Handlers[command]
+		if !ok {
+			fmt.Println("Invalid command: ", command)
+		}
+
+		handler(dt, args)
+	})
 
 	conn, err := ser.Accept()
 	if err != nil {
@@ -27,8 +41,6 @@ func main() {
 		return
 	}
 	defer conn.Close()
-
-	dt := createDT()
 
 	for {
 		reader := NewRespReader(conn)

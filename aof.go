@@ -1,8 +1,9 @@
 package main
 
 import (
-	"os"
 	"bufio"
+	"io"
+	"os"
 	"sync"
 	"time"
 )
@@ -52,6 +53,29 @@ func (aof *Aof) AofWrite(value Value) error {
 
 	if _, err := aof.file.Write(value.replyValue()); err != nil {
 		return err
+	}
+
+	return nil
+}
+
+func (aof *Aof) AofRead(callback func(value Value)) error {
+	aof.mu.Lock()
+	defer aof.mu.Unlock()
+
+	reader := NewRespReader(aof.file)
+
+	for {
+		value, err := reader.Read()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+
+			return err
+		}
+
+		callback(value)
+		
 	}
 
 	return nil
