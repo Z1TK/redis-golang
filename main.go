@@ -15,6 +15,12 @@ func main() {
 	}
 	defer ser.Close()
 
+	aof, err := NewAof("database.aof")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
 	conn, err := ser.Accept()
 	if err != nil {
 		fmt.Println(err)
@@ -53,8 +59,12 @@ func main() {
 			writer.Write(Value{typ: "string", str: ""})
 			continue
 		}
-		result := handler(dt, args)
 
+		if command == "SET" || command == "HSET" {
+			aof.AofWrite(value)
+		}
+
+		result := handler(dt, args)
 		writer.Write(result)
 	}
 }
