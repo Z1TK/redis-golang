@@ -5,10 +5,11 @@ This is a project for creating a Redis database using the Go programming languag
 ## Links 
 ***
 - [Setup](#setup)
-- [Use][#use]
-- [Commands][#commands]
+- [Use](#use)
+- [Commands](#commands)
 
 ### Setup
+***
 To set up project:
 1. Clone the repository:
 ```
@@ -24,12 +25,14 @@ To set up project:
 ```
 
 ### Use
+***
 Use following command to connect to redis-golang server
 ```
 redis-cli
 ```
 
 ### Commands
+***
 redis-golang supports the following commands:
 1. String
 ```
